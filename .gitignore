@@ -1,0 +1,31 @@
+# Environment
+.env
+
+# Docker volumes (HEAVY)
+postgres_data/
+frigate_media/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Frigate database (constantly changing)
+configs/frigate/frigate.db
+configs/frigate/frigate.db-shm
+configs/frigate/frigate.db-wal
+configs/frigate/.storage/
+configs/frigate/.exports/
+configs/frigate/.jwt_secret
+configs/frigate/.timeline
+configs/frigate/.vacuum
+
+# Backups and transfers
+*.backup
+*.tar.gz
+*.zip
+
+# OS
+.DS_Store
+*.swp

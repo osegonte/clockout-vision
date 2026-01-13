@@ -1,0 +1,72 @@
+mqtt:
+  enabled: true
+  host: mqtt
+  port: 1883
+
+cameras:
+  test_camera:
+    enabled: true
+    ffmpeg:
+      inputs:
+        - path: /dev/video0
+          input_args:
+            - -f
+            - v4l2
+            - -input_format
+            - mjpeg
+            - -video_size
+            - 640x480
+            - -framerate
+            - '5'
+          roles:
+            - detect
+    detect:
+      enabled: true
+      width: 640
+      height: 480
+      fps: 5
+    
+    # GATE ZONE - Define the doorway/gate area
+    zones:
+      gate_entrance:
+        coordinates: 128,240, 512,240, 512,480, 128,480
+        # This creates a box in the lower portion of the frame
+        # Adjust these coordinates to match your actual gate/doorway
+        # Format: x1,y1, x2,y2, x3,y3, x4,y4 (clockwise from top-left)
+        
+        # Filters for this zone
+        objects:
+          - person
+        
+        # Zone filters
+        filters:
+          person:
+            min_area: 3000
+            max_area: 100000
+            threshold: 0.7
+    
+    objects:
+      track:
+        - person
+      filters:
+        person:
+          min_area: 2000
+          threshold: 0.65
+
+snapshots:
+  enabled: true
+  retain:
+    default: 7
+
+record:
+  enabled: false
+
+detectors:
+  cpu:
+    type: cpu
+    num_threads: 3
+
+detect:
+  enabled: true
+
+version: 0.16-0

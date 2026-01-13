@@ -1,0 +1,16 @@
+# ClockOut Vision - Module Configuration
+# Enable/disable features and configure behavior
+
+modules:
+  attendance:
+    enabled: true
+    camera: test_camera
+    gate_zone: gate_entrance
+    min_zone_duration: 1.0      # Seconds person must be in zone to count
+    cooldown_seconds: 15         # Prevent double-counting within this time
+    
+  security:
+    enabled: false               # Not implemented yet
+    
+  tasks:
+    enabled: false               # Not implemented yet
