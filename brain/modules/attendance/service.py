@@ -177,7 +177,7 @@ class AttendanceModule:
         self._update_daily_summary('entry')
     
     def _record_exit(self, event: Event):
-        """Record a worker exit"""
+        """Record a worker exit - FIXED VERSION"""
         logger.info(f"👋 Worker EXITED through gate at {event.timestamp}")
         
         # Find most recent active session
@@ -196,15 +196,15 @@ class AttendanceModule:
             self.db.commit()
             
             logger.info(f"✅ Session completed: {session.duration_minutes} minutes")
+            
+            # FIX: Only decrement counter if we actually closed a session
+            new_count = redis_client.decrement_onsite()
+            logger.info(f"📊 Onsite count: {new_count}")
+            
+            # Update daily summary
+            self._update_daily_summary('exit')
         else:
-            logger.warning("⚠️  Exit detected but no active session found")
-        
-        # Decrement onsite count
-        new_count = redis_client.decrement_onsite()
-        logger.info(f"📊 Onsite count: {new_count}")
-        
-        # Update daily summary
-        self._update_daily_summary('exit')
+            logger.warning("⚠️  Exit detected but no active session found - counter NOT decremented")
     
     def _update_daily_summary(self, action: str):
         """Update daily summary statistics - FIXED VERSION"""
