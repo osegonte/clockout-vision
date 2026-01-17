@@ -12,6 +12,9 @@ from brain.core.database import SessionLocal
 
 logger = logging.getLogger(__name__)
 
+# Simple in-memory tracking map: frigate_event_id -> person_name
+person_tracking = {}
+
 class EventProcessor:
     def __init__(self, mqtt_host='mqtt', mqtt_port=1883):
         self.mqtt_host = mqtt_host
@@ -96,6 +99,10 @@ class EventProcessor:
             db.commit()
             logger.info(f"Stored event in database: {camera_id}/{label}")
             
+            # SMART ROUTING: Identify person ONCE when first detected
+            if event_type == 'new' and label == 'person':
+                self._identify_new_person(db, payload)
+            
             # MODULAR ROUTING: Process through attendance module
             if event_type in ['new', 'update'] and label == 'person':
                 try:
@@ -110,6 +117,14 @@ class EventProcessor:
                         # Import and use attendance module
                         from brain.modules.attendance.service import AttendanceModule
                         attendance = AttendanceModule(db)
+                        
+                        # Get person name from tracking map
+                        frigate_id = latest_event.frigate_event_id
+                        person_name = person_tracking.get(frigate_id, 'Unknown')
+                        
+                        # Add person_name to event for attendance processing
+                        latest_event.extra_data['person_name'] = person_name
+                        
                         attendance.process_event(latest_event)
                         
                 except Exception as e:
@@ -120,6 +135,37 @@ class EventProcessor:
             db.rollback()
         finally:
             db.close()
+    
+    def _identify_new_person(self, db: Session, payload: dict):
+        """
+        Identify person when first detected (NEW event).
+        This runs ONCE per person, not every frame!
+        """
+        try:
+            after = payload.get('after', {})
+            frigate_event_id = after.get('id')
+            
+            if not frigate_event_id:
+                return
+            
+            # Check if already identified
+            if frigate_event_id in person_tracking:
+                return
+            
+            logger.info(f"🆕 New person detected: {frigate_event_id} - Attempting identification...")
+            
+            # Get snapshot from Frigate
+            # For now, we'll identify using the first frame
+            # In production, you'd fetch the snapshot from Frigate's API
+            
+            # TODO: Implement snapshot fetching from Frigate
+            # For now, mark as "Unknown" - we'll improve this next
+            person_tracking[frigate_event_id] = "Unknown"
+            
+            logger.info(f"👤 Person {frigate_event_id} identified as: Unknown (face recognition pending)")
+            
+        except Exception as e:
+            logger.error(f"Error identifying person: {e}", exc_info=True)
     
     def start(self):
         """Start the event processor"""

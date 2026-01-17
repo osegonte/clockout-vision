@@ -1,7 +1,6 @@
 """
-Simplified Attendance Module - FINAL FIXED VERSION
-Uses Frigate zone detection for reliable attendance tracking
-All bugs fixed and ready for production testing
+Simplified Attendance Module - EFFICIENT VERSION
+Uses person identification from event processor (identify ONCE per person)
 """
 import logging
 from datetime import datetime, date
@@ -17,11 +16,12 @@ logger = logging.getLogger(__name__)
 
 class AttendanceModule:
     """
-    Simplified attendance tracking using zone detection.
+    Efficient attendance tracking using zone detection + person identification.
     
     Logic:
-    - Person enters gate zone = Entry (create session)
-    - Person exits gate zone after being tracked = Exit (close session)
+    - Person identified ONCE when first detected (by event processor)
+    - Person enters gate zone = Entry (create session with person_name)
+    - Person exits gate zone = Exit (close session)
     - Uses zone duration to avoid false triggers
     """
     
@@ -41,7 +41,7 @@ class AttendanceModule:
         Process detection event for attendance tracking.
         
         Args:
-            event: Detection event from Frigate
+            event: Detection event from Frigate (with person_name in extra_data)
         """
         if not self.enabled:
             return
@@ -54,56 +54,59 @@ class AttendanceModule:
         if event.camera_id != self.gate_camera:
             return
         
+        # Get person name from event (set by event processor)
+        person_name = event.extra_data.get('person_name', 'Unknown') if event.extra_data else 'Unknown'
+        
         # Check if person is in gate zone
         zones = event.extra_data.get('zones', []) if event.extra_data else []
         
         if self.gate_zone in zones:
-            self._handle_zone_entry(event)
+            self._handle_zone_entry(event, person_name)
         else:
             # Person detected but not in gate zone anymore
-            self._handle_zone_exit(event)
+            self._handle_zone_exit(event, person_name)
     
-    def _handle_zone_entry(self, event: Event):
+    def _handle_zone_entry(self, event: Event, person_name: str):
         """Handle person entering gate zone"""
         
         # Check cooldown to prevent spam
-        detection_key = f"detection_{event.frigate_event_id or event.id}"
+        detection_key = f"detection_{event.frigate_event_id or event.id}_{person_name}"
         if self._is_in_cooldown(detection_key):
             logger.debug(f"Detection {detection_key} in cooldown, skipping")
             return
         
         # Track this detection in Redis with timestamp
-        self._track_zone_presence(event)
+        self._track_zone_presence(event, person_name)
         
         # Check if person has been in zone long enough
-        zone_duration = self._get_zone_duration(event)
+        zone_duration = self._get_zone_duration(event, person_name)
         
         if zone_duration >= self.min_zone_duration:
             # Check if we already counted this entry
-            if not self._was_counted(event, 'entry'):
-                self._record_entry(event)
-                self._mark_counted(event, 'entry')
+            if not self._was_counted(event, person_name, 'entry'):
+                self._record_entry(event, person_name)
+                self._mark_counted(event, person_name, 'entry')
                 self._set_cooldown(detection_key)
     
-    def _handle_zone_exit(self, event: Event):
+    def _handle_zone_exit(self, event: Event, person_name: str):
         """Handle person leaving gate zone"""
         
         # Check if this person had an active presence in the zone
-        zone_duration = self._get_zone_duration(event)
+        zone_duration = self._get_zone_duration(event, person_name)
         
         if zone_duration >= self.min_zone_duration:
             # Person was in zone long enough and now left
-            if not self._was_counted(event, 'exit'):
-                self._record_exit(event)
-                self._mark_counted(event, 'exit')
+            if not self._was_counted(event, person_name, 'exit'):
+                self._record_exit(event, person_name)
+                self._mark_counted(event, person_name, 'exit')
         
         # Clean up tracking
-        self._clear_zone_tracking(event)
+        self._clear_zone_tracking(event, person_name)
     
-    def _track_zone_presence(self, event: Event):
+    def _track_zone_presence(self, event: Event, person_name: str):
         """Track when person entered the zone"""
         detection_id = event.frigate_event_id or f"event_{event.id}"
-        key = f"attendance:zone_entry:{self.gate_camera}:{detection_id}"
+        key = f"attendance:zone_entry:{self.gate_camera}:{detection_id}:{person_name}"
         
         # Store entry timestamp if not already stored
         if not self.redis.exists(key):
@@ -113,10 +116,10 @@ class AttendanceModule:
                 event.timestamp.timestamp()
             )
     
-    def _get_zone_duration(self, event: Event) -> float:
+    def _get_zone_duration(self, event: Event, person_name: str) -> float:
         """Get how long person has been in zone"""
         detection_id = event.frigate_event_id or f"event_{event.id}"
-        key = f"attendance:zone_entry:{self.gate_camera}:{detection_id}"
+        key = f"attendance:zone_entry:{self.gate_camera}:{detection_id}:{person_name}"
         
         entry_time = self.redis.get(key)
         if not entry_time:
@@ -127,22 +130,22 @@ class AttendanceModule:
         
         return current_timestamp - entry_timestamp
     
-    def _clear_zone_tracking(self, event: Event):
+    def _clear_zone_tracking(self, event: Event, person_name: str):
         """Clear zone tracking data"""
         detection_id = event.frigate_event_id or f"event_{event.id}"
-        key = f"attendance:zone_entry:{self.gate_camera}:{detection_id}"
+        key = f"attendance:zone_entry:{self.gate_camera}:{detection_id}:{person_name}"
         self.redis.delete(key)
     
-    def _was_counted(self, event: Event, action: str) -> bool:
+    def _was_counted(self, event: Event, person_name: str, action: str) -> bool:
         """Check if this detection was already counted"""
         detection_id = event.frigate_event_id or f"event_{event.id}"
-        key = f"attendance:counted:{action}:{detection_id}"
+        key = f"attendance:counted:{action}:{detection_id}:{person_name}"
         return self.redis.exists(key) > 0
     
-    def _mark_counted(self, event: Event, action: str):
+    def _mark_counted(self, event: Event, person_name: str, action: str):
         """Mark detection as counted"""
         detection_id = event.frigate_event_id or f"event_{event.id}"
-        key = f"attendance:counted:{action}:{detection_id}"
+        key = f"attendance:counted:{action}:{detection_id}:{person_name}"
         self.redis.setex(key, 60, '1')  # Remember for 60 seconds
     
     def _is_in_cooldown(self, detection_key: str) -> bool:
@@ -155,16 +158,17 @@ class AttendanceModule:
         key = f"attendance:cooldown:{detection_key}"
         self.redis.setex(key, self.cooldown_seconds, '1')
     
-    def _record_entry(self, event: Event):
-        """Record a worker entry"""
-        logger.info(f"✅ Worker ENTERED through gate at {event.timestamp}")
+    def _record_entry(self, event: Event, person_name: str):
+        """Record a worker entry - NOW WITH PERSON NAME!"""
+        logger.info(f"✅ {person_name} ENTERED through gate at {event.timestamp}")
         
         # Create new session
         session = AttendanceSession(
             entry_time=event.timestamp,
             entry_camera=event.camera_id,
             entry_event_id=event.id,
-            status=SessionStatus.active
+            status=SessionStatus.active,
+            person_id=None  # TODO: Link to Person table if person_name != 'Unknown'
         )
         self.db.add(session)
         self.db.commit()
@@ -176,9 +180,9 @@ class AttendanceModule:
         # Update daily summary
         self._update_daily_summary('entry')
     
-    def _record_exit(self, event: Event):
-        """Record a worker exit - FIXED VERSION"""
-        logger.info(f"👋 Worker EXITED through gate at {event.timestamp}")
+    def _record_exit(self, event: Event, person_name: str):
+        """Record a worker exit - NOW WITH PERSON NAME!"""
+        logger.info(f"👋 {person_name} EXITED through gate at {event.timestamp}")
         
         # Find most recent active session
         session = self.db.query(AttendanceSession)\
@@ -197,7 +201,7 @@ class AttendanceModule:
             
             logger.info(f"✅ Session completed: {session.duration_minutes} minutes")
             
-            # FIX: Only decrement counter if we actually closed a session
+            # FIX: Only decrement if we actually closed a session
             new_count = redis_client.decrement_onsite()
             logger.info(f"📊 Onsite count: {new_count}")
             

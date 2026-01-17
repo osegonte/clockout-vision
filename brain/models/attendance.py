@@ -2,6 +2,7 @@
 Attendance models for tracking worker entry/exit
 """
 from sqlalchemy import Column, String, Integer, DateTime, Enum, ForeignKey
+from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
 
@@ -20,6 +21,9 @@ class AttendanceSession(Base):
     __tablename__ = 'attendance_sessions'
     
     id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    # Person identification (NEW: link to Person model)
+    person_id = Column(Integer, ForeignKey('persons.id'), nullable=True)
     
     # Entry information
     entry_time = Column(DateTime, nullable=False, index=True)
@@ -40,6 +44,9 @@ class AttendanceSession(Base):
     # Metadata
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationship to Person
+    person = relationship("Person", back_populates="attendance_sessions")
     
     def __repr__(self):
         return f"<AttendanceSession(id={self.id}, status={self.status.value}, entry={self.entry_time})>"

@@ -32,5 +32,6 @@ def init_db():
     """Initialize database - create tables"""
     from brain.models.events import Base
     from brain.models.attendance import AttendanceSession, AttendanceDailySummary
+    from brain.models.person import Person
     Base.metadata.create_all(bind=engine)
     print("Database tables created successfully!")

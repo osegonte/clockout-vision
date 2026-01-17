@@ -36,8 +36,6 @@ services:
     devices:
       - /dev/video0:/dev/video0
       - /dev/video1:/dev/video1
-      - /dev/video2:/dev/video2
-      - /dev/video3:/dev/video3
     volumes:
       - ./configs/frigate:/config
       - frigate_media:/media/frigate
@@ -74,6 +72,9 @@ services:
     volumes:
       - ./brain:/app/brain
       - ./configs:/app/configs
+    devices:                           # ADD THIS SECTION
+      - /dev/video0:/dev/video0        # ADD THIS
+      - /dev/video1:/dev/video1        # ADD THIS
 
 volumes:
   postgres_data:
